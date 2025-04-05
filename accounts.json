@@ -1,0 +1,26 @@
+[
+  {
+    "email": "user7@example.com",
+    "password": "tokyoghoul111"
+  },
+  {
+    "email": "user9@example.com",
+    "password": "bleachwarrior333"
+  },
+  {
+    "email": "user10@example.com",
+    "password": "fairytail555"
+  },
+  {
+    "email": "user13@example.com",
+    "password": "onepunch789"
+  },
+  {
+    "email": "user15@example.com",
+    "password": "blackclover666"
+  },
+  {
+    "id": "dummy_user1@example.com",
+    "password": "password123"
+  }
+]
