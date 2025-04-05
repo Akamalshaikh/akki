@@ -1,0 +1,26 @@
+{
+    "name": "telegram-bot",
+    "version": "1.0.0",
+    "description": "Crunchyroll Account Distribution Bot",
+    "main": "bot.js",
+    "scripts": {
+        "start": "node bot.js",
+        "dev": "nodemon bot.js"
+    },
+    "dependencies": {
+        "dotenv": "^16.4.7",
+        "node-telegram-bot-api": "^0.61.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/Akamalshaikh/akki.git"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "type": "commonjs",
+    "bugs": {
+        "url": "https://github.com/Akamalshaikh/akki/issues"
+    },
+    "homepage": "https://github.com/Akamalshaikh/akki#readme"
+}

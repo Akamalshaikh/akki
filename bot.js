@@ -1,9 +1,10 @@
+require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 
-// Bot configuration
-const token = '8014954303:AAHgmvc1cxJjlba0Wq5O_gHjHmFLfz1y4Zc';
-const adminId = 6048265605;
+// Bot configuration from environment variables
+const token = process.env.BOT_TOKEN;
+const adminId = parseInt(process.env.ADMIN_ID);
 
 // Initialize bot
 const bot = new TelegramBot(token, { polling: true });
