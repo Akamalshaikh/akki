@@ -2,244 +2,280 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 
-// Bot configuration from environment variables
+// Configuration
 const token = process.env.BOT_TOKEN;
-const adminId = parseInt(process.env.ADMIN_ID);
+const ownerId = parseInt(process.env.OWNER_ID);
+let admins = new Set([ownerId]);
+const usersFile = './users.json';
+const adminsFile = './admins.json';
+const channelsFile = './channels.json';
+const claimedFile = './claimed.json';
 
 // Initialize bot
 const bot = new TelegramBot(token, { polling: true });
 
-// Store required channels
+// Data storage
 let requiredChannels = [
-    { url: 'https://t.me/+9N72TRLiO5kyZTU1', title: 'Main Channel' },
-    { url: 'https://t.me/+nD2F89aUQF1kNmY9', title: 'Updates Channel' },
+    { id: -1002690583423, url: 'https://t.me/+ISX82ZNLnYQ4YjNl', title: 'Main Channel' }
 ];
-
-// Load or create accounts database
 let accounts = [];
+let allUsers = new Set();
+let claimedUsers = new Set();
+
+// Load data
 try {
-    if (fs.existsSync('./accounts.json')) {
-        accounts = JSON.parse(fs.readFileSync('./accounts.json', 'utf8'));
-    } else {
-        fs.writeFileSync('./accounts.json', JSON.stringify([]));
-    }
+    if (fs.existsSync('./accounts.json')) accounts = JSON.parse(fs.readFileSync('./accounts.json', 'utf8'));
+    if (fs.existsSync(usersFile)) allUsers = new Set(JSON.parse(fs.readFileSync(usersFile, 'utf8')));
+    if (fs.existsSync(adminsFile)) admins = new Set(JSON.parse(fs.readFileSync(adminsFile, 'utf8')));
+    if (fs.existsSync(channelsFile)) requiredChannels = JSON.parse(fs.readFileSync(channelsFile, 'utf8'));
+    if (fs.existsSync(claimedFile)) claimedUsers = new Set(JSON.parse(fs.readFileSync(claimedFile, 'utf8')));
 } catch (error) {
-    console.error('Error with accounts database:', error);
-    fs.writeFileSync('./accounts.json', JSON.stringify([]));
+    console.error('Initialization error:', error);
 }
 
-// User states tracking
-const userStates = {};
+// Helper functions
+function saveData() {
+    fs.writeFileSync('./accounts.json', JSON.stringify(accounts, null, 2));
+    fs.writeFileSync(usersFile, JSON.stringify([...allUsers], null, 2));
+    fs.writeFileSync(adminsFile, JSON.stringify([...admins], null, 2));
+    fs.writeFileSync(channelsFile, JSON.stringify(requiredChannels, null, 2));
+    fs.writeFileSync(claimedFile, JSON.stringify([...claimedUsers], null, 2));
+}
 
-// Start command handler
+// Admin check middleware
+function isAdmin(userId) {
+    return admins.has(userId);
+}
+
+// Start command
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    await sendWelcomeMessage(chatId, false); // Initially hide "JOINED" button
-
-    // Wait for 20 seconds before showing the "JOINED" button
-    setTimeout(async () => {
-        await sendWelcomeMessage(chatId, true); // Show "JOINED" button after 20 seconds
-    }, 20000);
+    allUsers.add(chatId);
+    saveData();
+    await showMainMenu(chatId);
 });
 
-// Admin command handler
+// Admin commands
 bot.onText(/\/admin/, async (msg) => {
     const chatId = msg.chat.id;
+    if (!isAdmin(chatId)) return;
+    await showAdminPanel(chatId);
+});
 
-    if (chatId !== adminId) {
-        bot.sendMessage(chatId, "❌ You are not authorized to access the admin panel.");
+bot.onText(/\/broadcast (.+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    if (!isAdmin(chatId)) return;
+    
+    const message = match[1];
+    Array.from(allUsers).forEach(user => {
+        bot.sendMessage(user, `📢 Broadcast:\n\n${message}`).catch(console.error);
+    });
+});
+
+bot.onText(/\/setadmin (\d+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    if (chatId !== ownerId) return;
+    
+    const newAdminId = parseInt(match[1]);
+    admins.add(newAdminId);
+    saveData();
+    bot.sendMessage(chatId, `✅ User ${newAdminId} added as admin`);
+});
+
+// Menu functions
+async function showMainMenu(chatId) {
+    const markup = {
+        inline_keyboard: [
+            [{ text: '🌟 Get Account', callback_data: 'get_account' }],
+            [{ text: '📢 Official Channel', url: 'https://t.me/+ISX82ZNLnYQ4YjNl' }]
+        ]
+    };
+    await bot.sendMessage(chatId, 'Main Menu:', { reply_markup: markup });
+}
+
+async function showAdminPanel(chatId) {
+    const markup = {
+        inline_keyboard: [
+            [{ text: '➕ Add Accounts', callback_data: 'add_accounts' }],
+            [{ text: '📤 Broadcast', callback_data: 'broadcast' }],
+            [{ text: '📊 Statistics', callback_data: 'stats' }],
+            [{ text: '➕ Add Channel', callback_data: 'add_channel' }],
+            [{ text: '🗑 Delete Channel', callback_data: 'delete_channel' }],
+            [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
+        ]
+    };
+    await bot.sendMessage(chatId, 'Admin Panel:', { reply_markup: markup });
+}
+
+// Callback handling
+const userStates = {};
+bot.on('callback_query', async (callbackQuery) => {
+    const chatId = callbackQuery.message.chat.id;
+    const data = callbackQuery.data;
+    const userId = callbackQuery.from.id;
+
+    try {
+        switch(data) {
+            case 'get_account':
+                await handleAccountRequest(chatId);
+                break;
+                
+            case 'add_accounts':
+                if (!isAdmin(userId)) return;
+                userStates[userId] = { action: 'add_accounts' };
+                await bot.sendMessage(chatId, 'Send accounts in format:\nemail:password\n(one per line)');
+                break;
+                
+            case 'delete_channel':
+                if (!isAdmin(userId)) return;
+                await showChannelManagement(chatId);
+                break;
+                
+            case 'broadcast':
+                if (!isAdmin(userId)) return;
+                userStates[userId] = { action: 'broadcast' };
+                await bot.sendMessage(chatId, 'Send broadcast message:');
+                break;
+                
+            case 'stats':
+                if (!isAdmin(userId)) return;
+                const stats = `📊 Statistics:\nUsers: ${allUsers.size}\nAccounts: ${accounts.length}\nChannels: ${requiredChannels.length}`;
+                await bot.sendMessage(chatId, stats);
+                break;
+                
+            case 'account_working':
+                await bot.answerCallbackQuery(callbackQuery.id, { text: "Thanks for confirming!" });
+                break;
+                
+            case 'account_not_working':
+                await bot.answerCallbackQuery(callbackQuery.id, { text: "Please contact @Its_solox with screenshot" });
+                break;
+                
+            default:
+                if (data.startsWith('delete_ch_')) {
+                    const index = parseInt(data.split('_')[2]);
+                    requiredChannels.splice(index, 1);
+                    saveData();
+                    await bot.sendMessage(chatId, '✅ Channel deleted successfully');
+                }
+                else if (data === 'main_menu') {
+                    await showMainMenu(chatId);
+                }
+                break;
+        }
+    } catch (error) {
+        console.error('Callback error:', error);
+    }
+});
+
+// Message handling
+bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text;
+    const userId = msg.from.id;
+    
+    // Handle admin actions
+    if (userStates[userId]?.action === 'add_accounts' && isAdmin(userId)) {
+        const accountsToAdd = text.split('\n').map(line => {
+            const [id, password] = line.split(':').map(s => s.trim());
+            return { id, password };
+        }).filter(a => a.id && a.password);
+        
+        accounts.push(...accountsToAdd);
+        saveData();
+        await bot.sendMessage(chatId, `✅ Added ${accountsToAdd.length} accounts`);
+        userStates[userId] = null;
+    }
+    else if (userStates[userId]?.action === 'broadcast' && isAdmin(userId)) {
+        Array.from(allUsers).forEach(user => {
+            bot.sendMessage(user, `📢 Broadcast:\n\n${text}`).catch(console.error);
+        });
+        userStates[userId] = null;
+    }
+    else if (userStates[userId]?.action === 'add_channel' && isAdmin(userId)) {
+        try {
+            const [title, url] = text.split('\n').map(s => s.trim());
+            const channelId = await bot.getChatIdFromInviteLink(url.split('/').pop());
+            requiredChannels.push({ id: channelId, url, title });
+            saveData();
+            await bot.sendMessage(chatId, '✅ Channel added successfully');
+        } catch (error) {
+            await bot.sendMessage(chatId, '❌ Error adding channel. Use format:\nTitle\nURL');
+        }
+        userStates[userId] = null;
+    }
+});
+
+// Channel management
+async function showChannelManagement(chatId) {
+    const channels = requiredChannels.map((ch, index) => [
+        { text: `${index + 1}. ${ch.title}`, callback_data: `delete_ch_${index}` }
+    ]);
+    await bot.sendMessage(chatId, 'Select channel to delete:', {
+        reply_markup: { inline_keyboard: channels }
+    });
+}
+
+// Account handling
+async function handleAccountRequest(chatId) {
+    if (claimedUsers.has(chatId)) {
+        await bot.sendMessage(chatId, "❌ You've already claimed your account. Only one account per user!");
+        return;
+    }
+    
+    if (await verifyMembership(chatId)) {
+        await provideAccount(chatId);
+    } else {
+        await showChannelJoinPrompt(chatId);
+    }
+}
+
+async function showChannelJoinPrompt(chatId) {
+    const buttons = requiredChannels.map(ch => [{ text: `Join ${ch.title}`, url: ch.url }]);
+    buttons.push([{ text: '✅ Verify Membership', callback_data: 'get_account' }]);
+    
+    await bot.sendMessage(chatId, 'Please join all required channels:', {
+        reply_markup: { inline_keyboard: buttons }
+    });
+}
+
+async function verifyMembership(userId) {
+    try {
+        for (const channel of requiredChannels) {
+            const member = await bot.getChatMember(channel.id, userId);
+            if (!['member', 'administrator', 'creator'].includes(member.status)) return false;
+        }
+        return true;
+    } catch (error) {
+        console.error('Verification error:', error);
+        return false;
+    }
+}
+
+async function provideAccount(chatId) {
+    if (accounts.length === 0) {
+        await bot.sendMessage(chatId, '❌ No accounts available. Please try later.');
         return;
     }
 
-    await sendAdminPanel(chatId);
-});
-
-// Send welcome message with channel buttons
-async function sendWelcomeMessage(chatId, showJoinedButton) {
-    try {
-        const channelButtons = [];
-
-        // Create rows of buttons for channels
-        for (let i = 0; i < requiredChannels.length; i++) {
-            channelButtons.push([{ text: `🔗 ${requiredChannels[i].title}`, url: requiredChannels[i].url }]);
-        }
-
-        // Add "JOINED" button only if showJoinedButton is true
-        if (showJoinedButton) {
-            channelButtons.push([{ text: '✅ [ JOINED ] ✅', callback_data: 'check_joined' }]);
-        }
-
-        const markup = { inline_keyboard: channelButtons };
-
-        await bot.sendMessage(
-            chatId,
-            showJoinedButton ? 
-            "Click the buttons below to join our channels and then click 'JOINED' to proceed:" :
-            "Please join all channels below. The 'JOINED' button will appear after you joined all channels.",
-            { reply_markup: markup }
-        );
-    } catch (error) {
-        console.error('Error sending welcome message:', error);
-        bot.sendMessage(chatId, "There was an error. Please try again later.");
-    }
-}
-
-// Send admin panel
-async function sendAdminPanel(chatId) {
-    try {
-        const markup = {
-            inline_keyboard: [
-                [{ text: '➕ Add Account', callback_data: 'admin_add_account' }],
-                [{ text: '➕ Add Channel', callback_data: 'admin_add_channel' }],
-                [{ text: '📊 Statistics', callback_data: 'admin_stats' }],
-                [{ text: '🔙 Back to Main Menu', callback_data: 'admin_back' }]
-            ]
-        };
-
-        await bot.sendMessage(chatId, "Welcome to Admin Panel", { reply_markup: markup });
-    } catch (error) {
-        console.error('Error sending admin panel:', error);
-        bot.sendMessage(chatId, "There was an error. Please try again later.");
-    }
-}
-
-// Handle button clicks for admin and users
-bot.on('callback_query', async (callbackQuery) => {
-    try {
-        const userId = callbackQuery.from.id;
-        const chatId = callbackQuery.message.chat.id;
-        const data = callbackQuery.data;
-
-        // Handle admin callbacks
-        if (userId === adminId) {
-            if (data === 'admin_add_account') {
-                await bot.answerCallbackQuery(callbackQuery.id);
-                userStates[userId] = { action: 'add_account' };
-                await bot.sendMessage(chatId, "Please send account details in this format:\n\nID:example@email.com\nPassword:examplepassword");
-                return;
-            } else if (data === 'admin_add_channel') {
-                await bot.answerCallbackQuery(callbackQuery.id);
-                userStates[userId] = { action: 'add_channel' };
-                await bot.sendMessage(chatId, "Please send channel details in this format:\n\nTitle:Channel Name\nURL:https://t.me/...");
-                return;
-            } else if (data === 'admin_stats') {
-                await bot.answerCallbackQuery(callbackQuery.id);
-                const stats = `📊 Bot Statistics\n\nTotal accounts available: ${accounts.length}\nRequired channels: ${requiredChannels.length}`;
-                await bot.sendMessage(chatId, stats);
-                return;
-            } else if (data === 'admin_back') {
-                await bot.answerCallbackQuery(callbackQuery.id);
-                await sendWelcomeMessage(chatId, true);
-                return;
-            }
-        }
-
-        // Handle user callbacks
-        if (data === 'check_joined') {
-            await bot.answerCallbackQuery(callbackQuery.id, { text: "You can now claim your account!" });
-            await provideAccount(chatId);
-        } else if (data === 'account_not_working') {
-            await bot.answerCallbackQuery(callbackQuery.id);
-            bot.sendMessage(
-                chatId,
-                "❌ Sorry that the account is not working. Please directly message @Its_solox with a screenshot of the issue."
-            );
-        }
-    } catch (error) {
-        console.error('Error handling callback query:', error);
-    }
-});
-
-// Provide a random account to user
-async function provideAccount(chatId) {
-    try {
-        if (accounts.length === 0) {
-            bot.sendMessage(chatId, "Sorry, there are no accounts available right now. Please try again later.");
-            return;
-        }
-
-        const randomIndex = Math.floor(Math.random() * accounts.length);
-        const account = accounts[randomIndex];
-        accounts.splice(randomIndex, 1);
-
-        fs.writeFileSync('./accounts.json', JSON.stringify(accounts, null, 2));
-
-        bot.sendMessage(
-            chatId,
-            `🎉 Here's your Crunchyroll account:\n\nID: ${account.id}\nPassword: ${account.password}\n\nIs this account working for you?`,
-            {
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            { text: "✅ Yes, it's working", callback_data: 'account_working' },
-                            { text: "❌ No, it's not working", callback_data: 'account_not_working' }
-                        ]
+    const account = accounts.shift();
+    claimedUsers.add(chatId);
+    saveData();
+    
+    await bot.sendMessage(
+        chatId,
+        `🎉 Account Details:\nEmail: ${account.id}\nPassword: ${account.password}\n\nPlease confirm if working:`,
+        {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Working', callback_data: 'account_working' },
+                        { text: '❌ Not Working', callback_data: 'account_not_working' }
                     ]
-                }
-            }
-        );
-    } catch (error) {
-        console.error('Error providing account:', error);
-        bot.sendMessage(chatId, "There was an error providing an account. Please try again later.");
-    }
-}
-
-// Handle admin actions for adding accounts or channels
-bot.on('message', async (msg) => {
-    try {
-        const userId = msg.from.id;
-        const chatId = msg.chat.id;
-        const text = msg.text;
-
-        if (!text || !userStates[userId]) return;
-
-        if (userStates[userId].action === 'add_account') {
-            userStates[userId] = null;
-
-            try {
-                const lines = text.split('\n');
-                if (lines.length < 2) throw new Error("Invalid format");
-
-                const idLine = lines[0].split(':');
-                const passwordLine = lines[1].split(':');
-
-                if (idLine.length < 2 || passwordLine.length < 2) throw new Error("Invalid format");
-
-                const id = idLine[1].trim();
-                const password = passwordLine[1].trim();
-
-                accounts.push({ id, password });
-                fs.writeFileSync('./accounts.json', JSON.stringify(accounts, null, 2));
-
-                await bot.sendMessage(chatId, `Account added successfully!\n\nID: ${id}\nPassword: ${password}`);
-            } catch (error) {
-                await bot.sendMessage(chatId, "Error adding account. Please use the correct format:\n\nID:example@email.com\nPassword:examplepassword");
-            }
-        } else if (userStates[userId].action === 'add_channel') {
-            userStates[userId] = null;
-
-            try {
-                const lines = text.split('\n');
-                if (lines.length < 2) throw new Error("Invalid format");
-
-                const titleLine = lines[0].split(':');
-                const urlLine = lines[1].split(':');
-
-                if (titleLine.length < 2 || urlLine.length < 2) throw new Error("Invalid format");
-
-                const title = titleLine[1].trim();
-                const url = urlLine.slice(1).join(':').trim();
-
-                requiredChannels.push({ url, title });
-
-                await bot.sendMessage(chatId, `Channel added successfully!\n\nTitle: ${title}\nURL: ${url}`);
-            } catch (error) {
-                await bot.sendMessage(chatId, "Error adding channel. Please use the correct format:\n\nTitle:Channel Name\nURL:https://t.me/...");
+                ]
             }
         }
-    } catch (error) {
-        console.error('Error handling message:', error);
-    }
-});
+    );
+}
 
-console.log('Bot started...');
+console.log('Bot started successfully!');
