@@ -1,351 +1,153 @@
-require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
+const fetch = require('node-fetch');
 const fs = require('fs');
 
-// Configuration
-const token = process.env.BOT_TOKEN;
-const ownerId = parseInt(process.env.OWNER_ID);
-let admins = new Set([ownerId]);
+// === CONFIG ===
+const BOT_TOKEN = '7604701474:AAF3H2URJWucUSLQhHCx55IaISDxafKs-FM';
+const CHANNEL_ID = -1002373935837; // Your channel ID (as a number)
+const CHANNEL_LINK = 'https://t.me/+kQyAexYL4J84MTll';
+const ADMIN_IDS = [6994528708]; // <-- Put your Telegram user ID(s) here
 
-// File paths
-const DATA_FILES = {
-    accounts: './accounts.json',
-    users: './users.json',
-    admins: './admins.json',
-    channels: './channels.json',
-    claims: './claims.json'
+const COUNTRY_FLAGS = {
+    "FRANCE": "🇫🇷", "UNITED STATES": "🇺🇸", "BRAZIL": "🇧🇷", "NAMIBIA": "🇳🇦",
+    "INDIA": "🇮🇳", "GERMANY": "🇩🇪", "THAILAND": "🇹🇭", "MEXICO": "🇲🇽", "RUSSIA": "🇷🇺",
 };
 
-// Initialize bot
-const bot = new TelegramBot(token, { polling: true });
-
-// Data storage
-let requiredChannels = [
-    { id: -1002690583423, url: 'https://t.me/+ISX82ZNLnYQ4YjNl', title: '🌟 VIP Channel' }
-];
-let accounts = [];
-let allUsers = new Set();
-let claims = {};
-
-// Load data
-function loadData() {
+const USERS_FILE = './users.json';
+let users = [];
+if (fs.existsSync(USERS_FILE)) {
     try {
-        accounts = fs.existsSync(DATA_FILES.accounts) ? JSON.parse(fs.readFileSync(DATA_FILES.accounts)) : [];
-        allUsers = new Set(fs.existsSync(DATA_FILES.users) ? JSON.parse(fs.readFileSync(DATA_FILES.users)) : []);
-        admins = new Set(fs.existsSync(DATA_FILES.admins) ? JSON.parse(fs.readFileSync(DATA_FILES.admins)) : [ownerId]);
-        requiredChannels = fs.existsSync(DATA_FILES.channels) ? JSON.parse(fs.readFileSync(DATA_FILES.channels)) : [];
-        claims = fs.existsSync(DATA_FILES.claims) ? JSON.parse(fs.readFileSync(DATA_FILES.claims)) : {};
-    } catch (error) {
-        console.error('Data load error:', error);
-    }
-}
-loadData();
-
-// Save data
-function saveData() {
-    try {
-        fs.writeFileSync(DATA_FILES.accounts, JSON.stringify(accounts, null, 2));
-        fs.writeFileSync(DATA_FILES.users, JSON.stringify([...allUsers], null, 2));
-        fs.writeFileSync(DATA_FILES.admins, JSON.stringify([...admins], null, 2));
-        fs.writeFileSync(DATA_FILES.channels, JSON.stringify(requiredChannels, null, 2));
-        fs.writeFileSync(DATA_FILES.claims, JSON.stringify(claims, null, 2));
-    } catch (error) {
-        console.error('Data save error:', error);
+        users = JSON.parse(fs.readFileSync(USERS_FILE));
+    } catch (e) {
+        users = [];
     }
 }
 
-// Admin check
-function isAdmin(userId) {
-    return admins.has(userId);
-}
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// Start command
-bot.onText(/\/start/, async (msg) => {
-    const chatId = msg.chat.id;
-    allUsers.add(chatId);
-    saveData();
-    
-    const isMember = await verifyMembership(chatId);
-    await showMainMenu(chatId, isMember);
-});
-
-// Main menu
-async function showMainMenu(chatId, isMember) {
-    let buttons = [];
-    
-    if (isMember) {
-        const lastClaim = claims[chatId] || 0;
-        const cooldown = Date.now() - lastClaim;
-        
-        if (cooldown < 3600000) {
-            const remaining = Math.ceil((3600000 - cooldown) / 60000);
-            buttons.push([{ 
-                text: `⏳ Try Again in ${remaining}min`, 
-                callback_data: 'cooldown' 
-            }]);
-        } else {
-            buttons.push([{ 
-                text: '🎁 Claim Free Account', 
-                callback_data: 'get_account' 
-            }]);
-        }
-    } else {
-        requiredChannels.forEach(ch => {
-            buttons.push([{ 
-                text: `🔗 Join ${ch.title}`, 
-                url: ch.url 
-            }]);
-        });
-        buttons.push([{ 
-            text: '✅ Verify Membership', 
-            callback_data: 'check_membership' 
-        }]);
+// === Helper: Save user if new ===
+function saveUser(id) {
+    if (!users.includes(id)) {
+        users.push(id);
+        fs.writeFileSync(USERS_FILE, JSON.stringify(users));
     }
-
-    await bot.sendMessage(chatId, `
-✨ *Welcome to CrunchyRoll Premium* ✨
-
-🎬 Get instant access to premium accounts
-⏳ 1 account per hour per user
-🔒 100% working accounts guarantee
-    `, {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: buttons }
-    });
 }
 
-// Membership verification
-async function verifyMembership(userId) {
+// === Helper: Extract BIN ===
+function extractBin(input) {
+    const match = input.match(/(\d{6,16})/);
+    if (!match) return null;
+    let bin = match[1];
+    return bin.length === 6 ? bin.padEnd(16, 'x') : bin;
+}
+
+// === Helper: Force Join Check ===
+async function isUserInChannel(userId) {
     try {
-        for (const channel of requiredChannels) {
-            const member = await bot.getChatMember(channel.id, userId);
-            if (!['member', 'administrator', 'creator'].includes(member.status)) return false;
-        }
-        return true;
-    } catch (error) {
-        console.error('Verification error:', error);
+        const res = await bot.getChatMember(CHANNEL_ID, userId);
+        return ['member', 'creator', 'administrator'].includes(res.status);
+    } catch (e) {
         return false;
     }
 }
 
-// Account distribution
-async function provideAccount(chatId) {
-    if (accounts.length === 0) {
-        await bot.sendMessage(chatId, '😢 *No accounts available currently!*\nPlease try again later.', {
-            parse_mode: 'Markdown'
-        });
-        return;
-    }
-
-    const account = accounts.shift();
-    claims[chatId] = Date.now();
-    saveData();
-    
-    await bot.sendMessage(
-        chatId,
-        `🎉 *Account Details* 🎉\n\n` +
-        `📧 Email: \`${account.id}\`\n` +
-        `🔑 Password: \`${account.password}\`\n\n` +
-        `⚠️ *Please confirm if working:*`,
-        {
-            parse_mode: 'Markdown',
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        { text: "✅ Working Perfectly", callback_data: 'account_working' },
-                        { text: "❌ Not Working", callback_data: 'account_not_working' }
-                    ],
-                    [
-                        { text: "📢 Join Updates Channel", url: 'https://t.me/+ISX82ZNLnYQ4YjNl' }
-                    ]
-                ]
-            }
-        }
-    );
-}
-
-// Callback handling
-bot.on('callback_query', async (callbackQuery) => {
-    const chatId = callbackQuery.message.chat.id;
-    const data = callbackQuery.data;
-    const userId = callbackQuery.from.id;
-
+// === Helper: Generate CCs ===
+async function generateCC(bin) {
+    const url = `https://drlabapis.onrender.com/api/ccgenerator?bin=${bin}&count=10`;
     try {
-        switch(data) {
-            case 'get_account':
-                await bot.answerCallbackQuery(callbackQuery.id);
-                await provideAccount(chatId);
-                break;
-                
-            case 'check_membership':
-                await bot.answerCallbackQuery(callbackQuery.id, { text: "🔍 Checking membership..." });
-                const isMember = await verifyMembership(chatId);
-                await showMainMenu(chatId, isMember);
-                break;
-                
-            case 'account_not_working':
-                await bot.answerCallbackQuery(callbackQuery.id);
-                await bot.sendMessage(
-                    chatId,
-                    `⚠️ *Account Not Working?*\n\n` +
-                    `Please contact our support team:\n` +
-                    `👤 @Its_solox\n\n` +
-                    `Include:\n` +
-                    `1. The account details\n` +
-                    `2. Screenshot of the issue\n` +
-                    `We'll provide a replacement within 24 hours!`,
-                    { parse_mode: 'Markdown' }
-                );
-                break;
-
-            case 'account_working':
-                await bot.answerCallbackQuery(callbackQuery.id, { text: "🎉 Enjoy your premium access!" });
-                break;
-
-            // Admin features
-            case 'admin_panel':
-                if (!isAdmin(userId)) return;
-                await showAdminPanel(chatId);
-                break;
-        }
-    } catch (error) {
-        console.error('Callback error:', error);
+        const res = await fetch(url, { timeout: 10000 });
+        if (!res.ok) return { error: `API error: ${res.status}` };
+        const text = await res.text();
+        return text.trim().split('\n');
+    } catch (e) {
+        return { error: e.message };
     }
-});
-
-// Admin commands
-bot.onText(/\/admin/, async (msg) => {
-    const chatId = msg.chat.id;
-    if (!isAdmin(chatId)) return;
-    await showAdminPanel(chatId);
-});
-
-async function showAdminPanel(chatId) {
-    const buttons = [
-        [{ text: '📤 Broadcast Message', callback_data: 'admin_broadcast' }],
-        [{ text: '📥 Add Accounts', callback_data: 'admin_add_accounts' }],
-        [{ text: '⚙️ Channel Management', callback_data: 'admin_channels' }],
-        [{ text: '📊 Statistics', callback_data: 'admin_stats' }],
-        [{ text: '🔙 Main Menu', callback_data: 'main_menu' }]
-    ];
-    
-    await bot.sendMessage(chatId, '🔧 *Admin Panel*', {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: buttons }
-    });
 }
 
-// Admin callback handlers
-bot.on('callback_query', async (callbackQuery) => {
-    const chatId = callbackQuery.message.chat.id;
-    const data = callbackQuery.data;
-    const userId = callbackQuery.from.id;
-
-    if (!isAdmin(userId)) return;
-
+// === Helper: Lookup BIN ===
+async function lookupBin(bin) {
+    const url = `https://drlabapis.onrender.com/api/bin?bin=${bin.slice(0,6)}`;
     try {
-        switch(data) {
-            case 'admin_broadcast':
-                userStates[userId] = { action: 'broadcast' };
-                await bot.sendMessage(chatId, '📢 Enter broadcast message:');
-                break;
-
-            case 'admin_add_accounts':
-                userStates[userId] = { action: 'add_accounts' };
-                await bot.sendMessage(chatId, '📩 Send accounts (format: email:password) one per line:');
-                break;
-
-            case 'admin_channels':
-                await showChannelManagement(chatId);
-                break;
-
-            case 'admin_stats':
-                const stats = `
-📊 *Statistics*
-Users: ${allUsers.size}
-Accounts Available: ${accounts.length}
-Channels: ${requiredChannels.length}
-                `;
-                await bot.sendMessage(chatId, stats, { parse_mode: 'Markdown' });
-                break;
-        }
-    } catch (error) {
-        console.error('Admin callback error:', error);
+        const res = await fetch(url, { timeout: 10000 });
+        if (!res.ok) return { error: `API error: ${res.status}` };
+        const data = await res.json();
+        const country = (data.country || 'NOT FOUND').toUpperCase();
+        return {
+            bank: (data.issuer || 'NOT FOUND').toUpperCase(),
+            card_type: (data.type || 'NOT FOUND').toUpperCase(),
+            network: (data.scheme || 'NOT FOUND').toUpperCase(),
+            tier: (data.tier || 'NOT FOUND').toUpperCase(),
+            country,
+            flag: COUNTRY_FLAGS[country] || '🏳️'
+        };
+    } catch (e) {
+        return { error: e.message };
     }
-});
-
-// Channel management
-async function showChannelManagement(chatId) {
-    const buttons = requiredChannels.map((ch, index) => [
-        { text: `🗑 ${ch.title}`, callback_data: `delete_ch_${index}` }
-    ]);
-    buttons.push([{ text: '➕ Add Channel', callback_data: 'add_channel' }]);
-    
-    await bot.sendMessage(chatId, '🔗 Channel Management:', {
-        reply_markup: { inline_keyboard: buttons }
-    });
 }
 
-// Message handling
-const userStates = {};
+// === Helper: Format CC Response ===
+function formatCCResponse(data, bin, binInfo) {
+    if (data.error) return `❌ ERROR: ${data.error}`;
+    if (!data.length) return '❌ NO CARDS GENERATED.';
+    let text = `𝗕𝗜𝗡 ⇾ <code>${bin.slice(0,6)}</code>\n`;
+    text += `𝗔𝗺𝗼𝘂𝗻𝘁 ⇾ <code>${data.length}</code>\n\n`;
+    data.forEach(card => text += `<code>${card.toUpperCase()}</code>\n`);
+    text += `\n𝗜𝗻𝗳𝗼: ${binInfo.card_type || 'NOT FOUND'} - ${binInfo.network || 'NOT FOUND'} (${binInfo.tier || 'NOT FOUND'})\n`;
+    text += `𝐈𝐬𝐬𝐮𝐞𝐫: ${binInfo.bank || 'NOT FOUND'}\n`;
+    text += `𝗖𝗼𝘂𝗻𝘁𝗿𝘆: ${binInfo.country || 'NOT FOUND'} ${binInfo.flag || '🏳️'}`;
+    return text;
+}
+
+// === Force Join Middleware ===
 bot.on('message', async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text;
-    const userId = msg.from.id;
-
-    // Admin actions
-    if (isAdmin(userId) && userStates[userId]) {
-        switch(userStates[userId].action) {
-            case 'broadcast':
-                Array.from(allUsers).forEach(user => {
-                    bot.sendMessage(user, `📢 *Admin Broadcast*\n\n${text}`, { parse_mode: 'Markdown' })
-                       .catch(console.error);
-                });
-                delete userStates[userId];
-                await bot.sendMessage(chatId, '✅ Broadcast sent to all users');
-                break;
-
-            case 'add_accounts':
-                const newAccounts = text.split('\n')
-                    .map(line => line.trim().split(':'))
-                    .filter(([id, pass]) => id && pass)
-                    .map(([id, password]) => ({ id, password }));
-                
-                accounts.push(...newAccounts);
-                saveData();
-                delete userStates[userId];
-                await bot.sendMessage(chatId, `✅ Added ${newAccounts.length} new accounts`);
-                break;
-
-            case 'add_channel':
-                try {
-                    const [title, url] = text.split('\n');
-                    const inviteCode = url.split('/').pop();
-                    const chat = await bot.getChat(inviteCode);
-                    
-                    requiredChannels.push({
-                        id: chat.id,
-                        title: title.trim(),
-                        url: url.trim()
-                    });
-                    saveData();
-                    await bot.sendMessage(chatId, '✅ Channel added successfully');
-                } catch (error) {
-                    await bot.sendMessage(chatId, '❌ Error adding channel. Use format:\nTitle\nURL');
-                }
-                delete userStates[userId];
-                break;
+    saveUser(msg.from.id);
+    if (msg.text && !msg.text.startsWith('/broadcast')) {
+        const inChannel = await isUserInChannel(msg.from.id);
+        if (!inChannel) {
+            bot.sendMessage(msg.chat.id,
+                `🔒 <b>Join our channel to use this bot!</b>\n\n👉 <a href="${CHANNEL_LINK}">Join Channel</a>`,
+                { parse_mode: 'HTML', disable_web_page_preview: true }
+            );
+            return;
         }
     }
 });
 
-// Error handling
-process.on('uncaughtException', (err) => {
-    console.error('Uncaught Exception:', err);
+// === /gen Command ===
+bot.onText(/^([/.]gen) (.+)/i, async (msg, match) => {
+    const binInput = match[2];
+    const bin = extractBin(binInput);
+    if (!bin) {
+        return bot.sendMessage(msg.chat.id, "❌ INVALID BIN FORMAT.", { parse_mode: "Markdown" });
+    }
+    const ccData = await generateCC(bin);
+    const binInfo = await lookupBin(bin);
+    const result = formatCCResponse(ccData, bin, binInfo);
+    bot.sendMessage(msg.chat.id, result, { parse_mode: "HTML" });
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection:', reason);
+// === /broadcast Command (Admins Only) ===
+bot.onText(/^\/broadcast (.+)/i, async (msg, match) => {
+    if (!ADMIN_IDS.includes(msg.from.id)) {
+        return bot.sendMessage(msg.chat.id, "❌ You are not authorized to use this command.");
+    }
+    const text = match[1];
+    let sent = 0, failed = 0;
+    for (const userId of users) {
+        try {
+            await bot.sendMessage(userId, `📢 Broadcast:\n\n${text}`);
+            sent++;
+        } catch (e) {
+            failed++;
+        }
+    }
+    bot.sendMessage(msg.chat.id, `✅ Broadcast sent to ${sent} users. Failed: ${failed}`);
 });
 
-console.log('🤖 Bot started successfully!');
+// === /start Command ===
+bot.onText(/^\/start/, (msg) => {
+    bot.sendMessage(msg.chat.id, "👋 Welcome! Use /gen <bin> to generate cards.");
+});
+
+// === Error Handling ===
+bot.on('polling_error', (err) => console.error(err));
