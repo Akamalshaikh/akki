@@ -3,7 +3,7 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 
 // === CONFIG ===
-const BOT_TOKEN = '7604701474:AAF3H2URJWucUSLQhHCx55IaISDxafKs-FM';
+const BOT_TOKEN = '8021373170:AAHt7XsxagS0qiCCFTPoA57WOLGLQp8Ixzw';
 const CHANNEL_ID = -1002373935837; // Your channel ID (as a number)
 const CHANNEL_LINK = 'https://t.me/+kQyAexYL4J84MTll';
 const ADMIN_IDS = [6994528708]; // <-- Put your Telegram user ID(s) here
