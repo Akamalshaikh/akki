@@ -4,8 +4,8 @@ const fs = require('fs');
 
 // === CONFIG ===
 const BOT_TOKEN = '8021373170:AAHt7XsxagS0qiCCFTPoA57WOLGLQp8Ixzw';
-const CHANNEL_ID = -1002420029455; // Your channel ID (as a number)
-const CHANNEL_LINK = 'https://t.me/+IGuHMrz7ASszZDg1';
+const CHANNEL_ID = -1002504022731; // Your channel ID (as a number)
+const CHANNEL_LINK = 'https://t.me/+cb2caCMs7284ZmRl';
 const ADMIN_IDS = [6994528708]; // <-- Put your Telegram user ID(s) here
 
 const COUNTRY_FLAGS = {
