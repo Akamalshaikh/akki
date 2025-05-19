@@ -5,8 +5,8 @@ const { faker } = require('@faker-js/faker');
 
 // === CONFIG ===
 const BOT_TOKEN = '8021373170:AAHt7XsxagS0qiCCFTPoA57WOLGLQp8Ixzw';
-const CHANNEL_ID = -1002504022731; // Your channel ID (as a number)
-const CHANNEL_LINK = 'https://t.me/+cb2caCMs7284ZmRl';
+const CHANNEL_ID = -1002514383107; // Your channel ID (as a number)
+const CHANNEL_LINK = 'https://t.me/+DcpBEaE6ONsxMGU1';
 const ADMIN_IDS = [6994528708]; // <-- Put your Telegram user ID(s) here
 
 const COUNTRY_FLAGS = {
