@@ -4,9 +4,9 @@ const fs = require('fs');
 const { faker } = require('@faker-js/faker');
 
 // === CONFIG ===
-const BOT_TOKEN = '8021373170:AAHt7XsxagS0qiCCFTPoA57WOLGLQp8Ixzw';
-const CHANNEL_ID = -1002658211908; // Your channel ID (as a number)
-const CHANNEL_LINK = 'https://t.me/+nxkG_bA_-9o0YmM1';
+const BOT_TOKEN = '8021373170:AAG75WxyYO8RK_4AiljLNuaGV7nX_kKRJXI';
+const CHANNEL_ID = -1002478772431; // Your channel ID (as a number)
+const CHANNEL_LINK = 'https://t.me/+3b2KKwNi01YzMTNl';
 const ADMIN_IDS = [6994528708]; // <-- Put your Telegram user ID(s) here
 
 const COUNTRY_FLAGS = {
